@@ -1,0 +1,204 @@
+<canvas class="brain-canvas" id="brain-canvas" aria-hidden="true"></canvas>
+
+<script>
+  (function () {
+    const canvas = document.getElementById('brain-canvas') as HTMLCanvasElement;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+
+    // ── Config ────────────────────────────────────────────────
+    const GRID     = 10;   // px between particle targets
+    const PIX      = 5;    // drawn pixel size
+    const ENTER_SPEED = 0.055;
+    const FIRE_CHANCE = 0.0012;
+    const FIRE_FRAMES = 28;
+    const CONN_DIST   = 48;
+
+    // Colors (matching VPDS navy palette)
+    const COL_BASE   = { r: 79,  g: 131, b: 234 }; // navy-300
+    const COL_FIRE   = { r: 200, g: 220, b: 255 }; // bright flash
+    const COL_LINE   = { r: 79,  g: 131, b: 234 };
+
+    // ── Brain shape ───────────────────────────────────────────
+    // Top-down (dorsal) view. nx/ny are normalised [-1, 1] relative
+    // to brain centre; r is the half-height of the brain.
+    function inBrain(nx: number, ny: number): boolean {
+      // Outer boundary: slightly elongated ellipse
+      const outer = (nx / 0.93) ** 2 + (ny / 0.87) ** 2;
+      if (outer > 1) return false;
+
+      // Narrow the front (frontal pole) and back (occipital pole)
+      if (ny < -0.78 && outer > 0.88) return false;
+
+      // Interhemispheric fissure running front-to-back
+      if (Math.abs(nx) < 0.068) return false;
+
+      return true;
+    }
+
+    // Brightness modifier based on simulated gyri (ridges)
+    function gyriBrightness(nx: number, ny: number): number {
+      const wave = Math.sin(ny * 9 + nx * 0.5) * Math.sin(nx * 5 + ny * 0.8);
+      return 0.28 + (wave * 0.5 + 0.5) * 0.55;
+    }
+
+    // ── State ─────────────────────────────────────────────────
+    interface Particle {
+      x: number; y: number;       // current position
+      tx: number; ty: number;     // target (settled) position
+      alpha: number;              // current opacity
+      baseAlpha: number;          // resting opacity
+      fireFrames: number;         // countdown when firing
+      delay: number;              // entry stagger frame
+    }
+
+    let particles: Particle[] = [];
+    let frame = 0;
+    let raf: number;
+
+    // ── Init ──────────────────────────────────────────────────
+    function init() {
+      cancelAnimationFrame(raf);
+      particles = [];
+      frame = 0;
+
+      const W = canvas.offsetWidth;
+      const H = canvas.offsetHeight;
+      canvas.width  = W;
+      canvas.height = H;
+
+      const cx = W / 2;
+      const cy = H * 0.50;
+      const rX = W  * 0.40;
+      const rY = H  * 0.42;
+
+      let idx = 0;
+      for (let gx = GRID; gx < W - GRID; gx += GRID) {
+        for (let gy = GRID; gy < H - GRID; gy += GRID) {
+          const nx = (gx - cx) / rX;
+          const ny = (gy - cy) / rY;
+          if (!inBrain(nx, ny)) continue;
+
+          const baseAlpha = gyriBrightness(nx, ny);
+          particles.push({
+            // Start at a random position off-screen / scattered
+            x: Math.random() * W,
+            y: Math.random() * H,
+            tx: gx,
+            ty: gy,
+            alpha: 0,
+            baseAlpha,
+            fireFrames: 0,
+            delay: idx * 0.6 + Math.random() * 30,
+          });
+          idx++;
+        }
+      }
+
+      // Shuffle for a non-linear entry wave
+      for (let i = particles.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [particles[i], particles[j]] = [particles[j], particles[i]];
+      }
+      // Re-assign staggered delays after shuffle
+      particles.forEach((p, i) => { p.delay = i * 0.55 + Math.random() * 20; });
+
+      draw();
+    }
+
+    // ── Draw loop ─────────────────────────────────────────────
+    function draw() {
+      frame++;
+      const W = canvas.width;
+      const H = canvas.height;
+
+      ctx.clearRect(0, 0, W, H);
+
+      const firing: Particle[] = [];
+
+      for (const p of particles) {
+        if (frame < p.delay) continue;
+
+        // Fly towards target
+        const dx = p.tx - p.x;
+        const dy = p.ty - p.y;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          p.x += dx * ENTER_SPEED;
+          p.y += dy * ENTER_SPEED;
+        } else {
+          p.x = p.tx;
+          p.y = p.ty;
+        }
+
+        // Fade in
+        const settled = Math.abs(p.x - p.tx) < 2;
+        const targetAlpha = settled ? p.baseAlpha : p.baseAlpha * 0.4;
+        p.alpha += (targetAlpha - p.alpha) * 0.08;
+
+        // Random neural firing (only once settled)
+        if (settled && p.fireFrames === 0 && Math.random() < FIRE_CHANCE) {
+          p.fireFrames = FIRE_FRAMES;
+        }
+        if (p.fireFrames > 0) {
+          p.fireFrames--;
+          p.alpha = Math.min(1, p.alpha + 0.12);
+          firing.push(p);
+        }
+
+        // Draw pixel
+        let r = COL_BASE.r, g = COL_BASE.g, b = COL_BASE.b;
+        if (p.fireFrames > 0) {
+          const t = p.fireFrames / FIRE_FRAMES;
+          r = Math.round(COL_BASE.r + (COL_FIRE.r - COL_BASE.r) * t);
+          g = Math.round(COL_BASE.g + (COL_FIRE.g - COL_BASE.g) * t);
+          b = Math.round(COL_BASE.b + (COL_FIRE.b - COL_BASE.b) * t);
+        }
+        ctx.fillStyle = `rgba(${r},${g},${b},${p.alpha.toFixed(3)})`;
+        ctx.fillRect(p.x - PIX / 2, p.y - PIX / 2, PIX, PIX);
+      }
+
+      // ── Neural connections between firing particles ────────
+      if (firing.length > 1) {
+        for (let i = 0; i < firing.length; i++) {
+          for (let j = i + 1; j < firing.length; j++) {
+            const a = firing[i];
+            const b = firing[j];
+            const dx = a.tx - b.tx;
+            const dy = a.ty - b.ty;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > CONN_DIST) continue;
+
+            const t = Math.min(a.fireFrames, b.fireFrames) / FIRE_FRAMES;
+            const lineAlpha = (1 - dist / CONN_DIST) * t * 0.55;
+            ctx.strokeStyle = `rgba(${COL_LINE.r},${COL_LINE.g},${COL_LINE.b},${lineAlpha.toFixed(3)})`;
+            ctx.lineWidth = 0.75;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      raf = requestAnimationFrame(draw);
+    }
+
+    // ── Responsive resize ─────────────────────────────────────
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(init, 120);
+    });
+    ro.observe(canvas);
+
+    init();
+  })();
+</script>
+
+<style>
+  .brain-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+</style>
