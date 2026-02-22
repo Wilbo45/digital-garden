@@ -1,198 +1,319 @@
 <canvas class="brain-canvas" id="brain-canvas" aria-hidden="true"></canvas>
 
 <script>
-  (function () {
-    const canvas = document.getElementById('brain-canvas') as HTMLCanvasElement;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
+(function () {
+  const canvas = document.getElementById('brain-canvas') as HTMLCanvasElement;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d')!;
 
-    // ── Config ────────────────────────────────────────────────
-    const GRID     = 10;   // px between particle targets
-    const PIX      = 5;    // drawn pixel size
-    const ENTER_SPEED = 0.055;
-    const FIRE_CHANCE = 0.0012;
-    const FIRE_FRAMES = 28;
-    const CONN_DIST   = 48;
+  // ── Config ──────────────────────────────────────────────────
+  const N_NODES      = 1100;   // fibre intersection nodes
+  const CONN_DIST    = 36;     // max px between connected nodes
+  const N_PULSES     = 5;      // simultaneous neural pulses
+  const PULSE_STEP   = 0.028;  // pulse speed (fraction of path per frame)
+  const FADE_SPEED   = 0.018;  // how fast the web fades in on load
+  const EDGE_ALPHA   = 0.16;   // resting fibre opacity
+  const NODE_ALPHA   = 0.28;   // resting node dot opacity
 
-    // Colors (matching VPDS navy palette)
-    const COL_BASE   = { r: 79,  g: 131, b: 234 }; // navy-300
-    const COL_FIRE   = { r: 200, g: 220, b: 255 }; // bright flash
-    const COL_LINE   = { r: 79,  g: 131, b: 234 };
+  // ── Brain path (lateral / side profile, frontal pole right) ─
+  // Returns the Path2D for the full brain silhouette.
+  // All coordinates are relative to W × H of the canvas.
+  function makeBrainPath(W: number, H: number): Path2D {
+    const cx = W * 0.50;
+    const cy = H * 0.44;
+    const sx = W * 0.43;
+    const sy = H * 0.41;
 
-    // ── Brain shape ───────────────────────────────────────────
-    // Top-down (dorsal) view. nx/ny are normalised [-1, 1] relative
-    // to brain centre; r is the half-height of the brain.
-    function inBrain(nx: number, ny: number): boolean {
-      // Outer boundary: slightly elongated ellipse
-      const outer = (nx / 0.93) ** 2 + (ny / 0.87) ** 2;
-      if (outer > 1) return false;
+    const p = new Path2D();
 
-      // Narrow the front (frontal pole) and back (occipital pole)
-      if (ny < -0.78 && outer > 0.88) return false;
+    // Temporal / frontal junction — starting point (front-bottom)
+    p.moveTo(cx + sx * 0.30, cy + sy * 0.54);
 
-      // Interhemispheric fissure running front-to-back
-      if (Math.abs(nx) < 0.068) return false;
+    // ── Frontal lobe (right side, curves upward) ──
+    p.bezierCurveTo(
+      cx + sx * 0.52, cy + sy * 0.24,
+      cx + sx * 0.70, cy - sy * 0.14,
+      cx + sx * 0.52, cy - sy * 0.56,
+    );
 
-      return true;
+    // ── Top arc: frontal → parietal → occipital ──
+    p.bezierCurveTo(
+      cx + sx * 0.28, cy - sy * 0.82,
+      cx - sx * 0.06, cy - sy * 0.86,
+      cx - sx * 0.38, cy - sy * 0.70,
+    );
+    p.bezierCurveTo(
+      cx - sx * 0.68, cy - sy * 0.52,
+      cx - sx * 0.82, cy - sy * 0.20,
+      cx - sx * 0.80, cy + sy * 0.10,
+    );
+
+    // ── Occipital → cerebellum notch ──
+    p.bezierCurveTo(
+      cx - sx * 0.76, cy + sy * 0.34,
+      cx - sx * 0.62, cy + sy * 0.44,
+      cx - sx * 0.50, cy + sy * 0.45,
+    );
+
+    // ── Cerebellum (bottom-left lobe) ──
+    p.bezierCurveTo(
+      cx - sx * 0.60, cy + sy * 0.74,
+      cx - sx * 0.30, cy + sy * 0.88,
+      cx - sx * 0.04, cy + sy * 0.78,
+    );
+
+    // ── Brainstem ──
+    p.bezierCurveTo(
+      cx + sx * 0.04, cy + sy * 0.86,
+      cx + sx * 0.16, cy + sy * 0.88,
+      cx + sx * 0.16, cy + sy * 0.76,
+    );
+
+    // ── Temporal lobe base back to start ──
+    p.bezierCurveTo(
+      cx + sx * 0.22, cy + sy * 0.64,
+      cx + sx * 0.26, cy + sy * 0.56,
+      cx + sx * 0.30, cy + sy * 0.54,
+    );
+
+    p.closePath();
+    return p;
+  }
+
+  // ── State ────────────────────────────────────────────────────
+  interface Node { x: number; y: number; fadeIn: number; }
+  interface Edge { a: number; b: number; dist: number; pulseGlow: number; }
+  interface Pulse { path: number[]; t: number; alpha: number; }
+
+  let nodes:  Node[]  = [];
+  let edges:  Edge[]  = [];
+  let pulses: Pulse[] = [];
+  let brainPath: Path2D;
+  let glowCx = 0, glowCy = 0;
+  let globalFade = 0;   // 0→1 as web fades in
+  let raf = 0;
+
+  // ── Build adjacency for pulse path-finding ───────────────────
+  let adj: Map<number, number[]> = new Map();
+
+  function buildAdj() {
+    adj.clear();
+    for (const e of edges) {
+      if (!adj.has(e.a)) adj.set(e.a, []);
+      if (!adj.has(e.b)) adj.set(e.b, []);
+      adj.get(e.a)!.push(e.b);
+      adj.get(e.b)!.push(e.a);
+    }
+  }
+
+  // ── Init ─────────────────────────────────────────────────────
+  function init() {
+    cancelAnimationFrame(raf);
+    nodes  = [];
+    edges  = [];
+    pulses = [];
+    globalFade = 0;
+
+    const W = canvas.offsetWidth;
+    const H = canvas.offsetHeight;
+    canvas.width  = W;
+    canvas.height = H;
+
+    brainPath = makeBrainPath(W, H);
+
+    // Corpus callosum glow centre (slightly below mid-brain)
+    glowCx = W * 0.48;
+    glowCy = H * 0.50;
+
+    // Scatter nodes, keeping only those inside brain shape
+    let attempts = 0;
+    while (nodes.length < N_NODES && attempts < N_NODES * 25) {
+      attempts++;
+      const x = W * 0.04 + Math.random() * W * 0.92;
+      const y = H * 0.04 + Math.random() * H * 0.92;
+      if (ctx.isPointInPath(brainPath, x, y)) {
+        // Vary fade-in timing: nodes near edge fade in first (surface fibres first)
+        const distFromCentre = Math.hypot(x - glowCx, y - glowCy);
+        const maxDist = Math.hypot(W * 0.5, H * 0.5);
+        nodes.push({ x, y, fadeIn: (distFromCentre / maxDist) * 0.7 + Math.random() * 0.3 });
+      }
     }
 
-    // Brightness modifier based on simulated gyri (ridges)
-    function gyriBrightness(nx: number, ny: number): number {
-      const wave = Math.sin(ny * 9 + nx * 0.5) * Math.sin(nx * 5 + ny * 0.8);
-      return 0.28 + (wave * 0.5 + 0.5) * 0.55;
-    }
+    // Sort by fadeIn so surface fibres appear before interior
+    nodes.sort((a, b) => b.fadeIn - a.fadeIn);
 
-    // ── State ─────────────────────────────────────────────────
-    interface Particle {
-      x: number; y: number;       // current position
-      tx: number; ty: number;     // target (settled) position
-      alpha: number;              // current opacity
-      baseAlpha: number;          // resting opacity
-      fireFrames: number;         // countdown when firing
-      delay: number;              // entry stagger frame
-    }
-
-    let particles: Particle[] = [];
-    let frame = 0;
-    let raf: number;
-
-    // ── Init ──────────────────────────────────────────────────
-    function init() {
-      cancelAnimationFrame(raf);
-      particles = [];
-      frame = 0;
-
-      const W = canvas.offsetWidth;
-      const H = canvas.offsetHeight;
-      canvas.width  = W;
-      canvas.height = H;
-
-      const cx = W / 2;
-      const cy = H * 0.50;
-      const rX = W  * 0.40;
-      const rY = H  * 0.42;
-
-      let idx = 0;
-      for (let gx = GRID; gx < W - GRID; gx += GRID) {
-        for (let gy = GRID; gy < H - GRID; gy += GRID) {
-          const nx = (gx - cx) / rX;
-          const ny = (gy - cy) / rY;
-          if (!inBrain(nx, ny)) continue;
-
-          const baseAlpha = gyriBrightness(nx, ny);
-          particles.push({
-            // Start at a random position off-screen / scattered
-            x: Math.random() * W,
-            y: Math.random() * H,
-            tx: gx,
-            ty: gy,
-            alpha: 0,
-            baseAlpha,
-            fireFrames: 0,
-            delay: idx * 0.6 + Math.random() * 30,
-          });
-          idx++;
+    // Build edge list
+    edges = [];
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < CONN_DIST) {
+          edges.push({ a: i, b: j, dist, pulseGlow: 0 });
         }
       }
-
-      // Shuffle for a non-linear entry wave
-      for (let i = particles.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [particles[i], particles[j]] = [particles[j], particles[i]];
-      }
-      // Re-assign staggered delays after shuffle
-      particles.forEach((p, i) => { p.delay = i * 0.55 + Math.random() * 20; });
-
-      draw();
     }
 
-    // ── Draw loop ─────────────────────────────────────────────
-    function draw() {
-      frame++;
-      const W = canvas.width;
-      const H = canvas.height;
+    buildAdj();
+    draw();
+  }
 
-      ctx.clearRect(0, 0, W, H);
+  // ── Pulse path: random walk through adjacency graph ──────────
+  function startPulse() {
+    const startIdx = Math.floor(Math.random() * nodes.length);
+    const path: number[] = [startIdx];
+    const visited = new Set([startIdx]);
+    let cur = startIdx;
 
-      const firing: Particle[] = [];
-
-      for (const p of particles) {
-        if (frame < p.delay) continue;
-
-        // Fly towards target
-        const dx = p.tx - p.x;
-        const dy = p.ty - p.y;
-        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-          p.x += dx * ENTER_SPEED;
-          p.y += dy * ENTER_SPEED;
-        } else {
-          p.x = p.tx;
-          p.y = p.ty;
-        }
-
-        // Fade in
-        const settled = Math.abs(p.x - p.tx) < 2;
-        const targetAlpha = settled ? p.baseAlpha : p.baseAlpha * 0.4;
-        p.alpha += (targetAlpha - p.alpha) * 0.08;
-
-        // Random neural firing (only once settled)
-        if (settled && p.fireFrames === 0 && Math.random() < FIRE_CHANCE) {
-          p.fireFrames = FIRE_FRAMES;
-        }
-        if (p.fireFrames > 0) {
-          p.fireFrames--;
-          p.alpha = Math.min(1, p.alpha + 0.12);
-          firing.push(p);
-        }
-
-        // Draw pixel
-        let r = COL_BASE.r, g = COL_BASE.g, b = COL_BASE.b;
-        if (p.fireFrames > 0) {
-          const t = p.fireFrames / FIRE_FRAMES;
-          r = Math.round(COL_BASE.r + (COL_FIRE.r - COL_BASE.r) * t);
-          g = Math.round(COL_BASE.g + (COL_FIRE.g - COL_BASE.g) * t);
-          b = Math.round(COL_BASE.b + (COL_FIRE.b - COL_BASE.b) * t);
-        }
-        ctx.fillStyle = `rgba(${r},${g},${b},${p.alpha.toFixed(3)})`;
-        ctx.fillRect(p.x - PIX / 2, p.y - PIX / 2, PIX, PIX);
-      }
-
-      // ── Neural connections between firing particles ────────
-      if (firing.length > 1) {
-        for (let i = 0; i < firing.length; i++) {
-          for (let j = i + 1; j < firing.length; j++) {
-            const a = firing[i];
-            const b = firing[j];
-            const dx = a.tx - b.tx;
-            const dy = a.ty - b.ty;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > CONN_DIST) continue;
-
-            const t = Math.min(a.fireFrames, b.fireFrames) / FIRE_FRAMES;
-            const lineAlpha = (1 - dist / CONN_DIST) * t * 0.55;
-            ctx.strokeStyle = `rgba(${COL_LINE.r},${COL_LINE.g},${COL_LINE.b},${lineAlpha.toFixed(3)})`;
-            ctx.lineWidth = 0.75;
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.stroke();
-          }
-        }
-      }
-
-      raf = requestAnimationFrame(draw);
+    const steps = 10 + Math.floor(Math.random() * 12);
+    for (let s = 0; s < steps; s++) {
+      const nbrs = (adj.get(cur) ?? []).filter(n => !visited.has(n));
+      if (!nbrs.length) break;
+      cur = nbrs[Math.floor(Math.random() * nbrs.length)];
+      path.push(cur);
+      visited.add(cur);
     }
 
-    // ── Responsive resize ─────────────────────────────────────
-    let resizeTimer: ReturnType<typeof setTimeout>;
-    const ro = new ResizeObserver(() => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(init, 120);
-    });
-    ro.observe(canvas);
+    if (path.length >= 4) {
+      pulses.push({ path, t: 0, alpha: 0.75 + Math.random() * 0.25 });
+    }
+  }
 
-    init();
-  })();
+  // Edge lookup map for O(1) access from pulse
+  const edgeKey = (a: number, b: number) => a < b ? `${a}_${b}` : `${b}_${a}`;
+  let edgeMap: Map<string, Edge> = new Map();
+
+  // ── Draw ─────────────────────────────────────────────────────
+  function draw() {
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Global fade-in progress (web builds in over ~3 seconds)
+    globalFade = Math.min(1, globalFade + FADE_SPEED);
+    const ready = globalFade > 0.85;
+
+    // ── 1. Draw all fibres (edges) — batched by opacity bucket ──
+    // Split into near/far from glow for depth effect
+    ctx.lineWidth = 0.55;
+    ctx.beginPath();
+    for (const e of edges) {
+      const na = nodes[e.a];
+      const nb = nodes[e.b];
+      const fadeA = Math.max(0, Math.min(1, (globalFade - na.fadeIn * 0.6)));
+      const fadeB = Math.max(0, Math.min(1, (globalFade - nb.fadeIn * 0.6)));
+      if (fadeA < 0.02 && fadeB < 0.02) continue;
+      const fade = (fadeA + fadeB) / 2;
+
+      // Depth: fibres closer to glow centre are slightly brighter
+      const midX = (na.x + nb.x) / 2;
+      const midY = (na.y + nb.y) / 2;
+      const d = Math.hypot(midX - glowCx, midY - glowCy);
+      const depthBoost = 1 - Math.min(1, d / (W * 0.38)) * 0.5;
+
+      const alpha = EDGE_ALPHA * fade * depthBoost + e.pulseGlow * 0.6;
+      ctx.moveTo(na.x, na.y);
+      ctx.lineTo(nb.x, nb.y);
+      // Can't vary alpha per-segment in a single path, so we stroke frequently
+      // Trade-off: stroke every ~200 edges for reasonable perf
+    }
+    ctx.strokeStyle = `rgba(55, 120, 230, ${(EDGE_ALPHA * globalFade).toFixed(3)})`;
+    ctx.stroke();
+
+    // ── Bright pulse-lit fibres (separate pass) ──
+    for (const e of edges) {
+      if (e.pulseGlow < 0.04) continue;
+      e.pulseGlow *= 0.88; // decay
+      const na = nodes[e.a], nb = nodes[e.b];
+      ctx.lineWidth = 0.9;
+      ctx.strokeStyle = `rgba(160, 210, 255, ${(e.pulseGlow).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(na.x, na.y);
+      ctx.lineTo(nb.x, nb.y);
+      ctx.stroke();
+    }
+
+    // ── 2. Node dots (very subtle intersections) ──
+    for (let i = 0; i < nodes.length; i += 3) { // draw every 3rd for perf
+      const n = nodes[i];
+      const fade = Math.max(0, Math.min(1, (globalFade - n.fadeIn * 0.6) * 3));
+      if (fade < 0.05) continue;
+      ctx.fillStyle = `rgba(90, 155, 245, ${(NODE_ALPHA * fade).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 3. Corpus callosum glow (inner light) ──
+    if (globalFade > 0.3) {
+      const r = Math.min(W, H) * 0.28;
+      const g = ctx.createRadialGradient(glowCx, glowCy, 0, glowCx, glowCy, r);
+      const gi = Math.min(1, (globalFade - 0.3) / 0.5);
+      g.addColorStop(0,    `rgba(170, 215, 255, ${(0.26 * gi).toFixed(3)})`);
+      g.addColorStop(0.35, `rgba(80,  140, 240, ${(0.12 * gi).toFixed(3)})`);
+      g.addColorStop(0.75, `rgba(30,   70, 180, ${(0.05 * gi).toFixed(3)})`);
+      g.addColorStop(1,    'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // ── 4. Neural pulses ──
+    if (ready) {
+      if (pulses.length < N_PULSES && Math.random() < 0.04) startPulse();
+
+      for (let pi = pulses.length - 1; pi >= 0; pi--) {
+        const pulse = pulses[pi];
+        pulse.t += PULSE_STEP;
+
+        const segI = Math.floor(pulse.t);
+        if (segI >= pulse.path.length - 1) { pulses.splice(pi, 1); continue; }
+
+        const segF = pulse.t - segI;
+        const na = nodes[pulse.path[segI]];
+        const nb = nodes[pulse.path[segI + 1]];
+
+        // Light up the current edge
+        const key = edgeKey(pulse.path[segI], pulse.path[segI + 1]);
+        const e = edgeMap.get(key);
+        if (e) e.pulseGlow = Math.max(e.pulseGlow, pulse.alpha * 0.9);
+
+        // Interpolated pulse position
+        const px = na.x + (nb.x - na.x) * segF;
+        const py = na.y + (nb.y - na.y) * segF;
+
+        // Pulse head: radial gradient dot
+        const pr = 7;
+        const pg = ctx.createRadialGradient(px, py, 0, px, py, pr);
+        pg.addColorStop(0,   `rgba(230, 245, 255, ${pulse.alpha.toFixed(3)})`);
+        pg.addColorStop(0.4, `rgba(120, 190, 255, ${(pulse.alpha * 0.6).toFixed(3)})`);
+        pg.addColorStop(1,   'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = pg;
+        ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
+      }
+    }
+
+    raf = requestAnimationFrame(draw);
+  }
+
+  // ── Build edge map after init (used by pulse highlighting) ───
+  function buildEdgeMap() {
+    edgeMap.clear();
+    for (const e of edges) {
+      edgeMap.set(edgeKey(e.a, e.b), e);
+    }
+  }
+
+  // ── Resize ───────────────────────────────────────────────────
+  let rsTimer: ReturnType<typeof setTimeout>;
+  new ResizeObserver(() => {
+    clearTimeout(rsTimer);
+    rsTimer = setTimeout(() => { init(); buildEdgeMap(); }, 150);
+  }).observe(canvas);
+
+  init();
+  buildEdgeMap();
+})();
 </script>
 
 <style>
