@@ -1,0 +1,120 @@
+---
+const nav = [
+  { label: 'Home',  href: '/' },
+  { label: 'Blog',  href: '/blog' },
+  { label: 'Work',  href: '/work' },
+  { label: 'About', href: '/about' },
+];
+
+const currentPath = Astro.url.pathname;
+---
+
+<header class="nav">
+  <div class="container nav__inner">
+    <a class="nav__brand" href="/">
+      <span class="nav__brand-mark">DG</span>
+      <span class="nav__brand-name">Digital Garden</span>
+    </a>
+
+    <nav aria-label="Primary navigation">
+      <ul class="nav__links" role="list">
+        {nav.map(({ label, href }) => (
+          <li>
+            <a
+              class:list={[
+                'nav__link',
+                {
+                  'nav__link--active':
+                    currentPath === href ||
+                    (href !== '/' && currentPath.startsWith(href)),
+                },
+              ]}
+              href={href}
+            >
+              {label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    height: var(--nav-height);
+    background: var(--color-navy-900);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .nav__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 100%;
+  }
+
+  /* Brand */
+  .nav__brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .nav__brand-mark {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    background: var(--color-navy-500);
+    color: #fff;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-bold);
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-sm);
+  }
+
+  .nav__brand-name {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    color: rgba(255, 255, 255, 0.9);
+    letter-spacing: -0.01em;
+  }
+
+  /* Links */
+  .nav__links {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .nav__link {
+    display: block;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: rgba(255, 255, 255, 0.55);
+    border-radius: var(--radius-sm);
+    transition: color 0.15s ease, background 0.15s ease;
+    text-decoration: none;
+  }
+
+  .nav__link:hover {
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  .nav__link--active {
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  @media (max-width: 480px) {
+    .nav__brand-name { display: none; }
+  }
+</style>

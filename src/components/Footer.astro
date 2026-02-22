@@ -1,0 +1,47 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="footer">
+  <div class="container footer__inner">
+    <p class="footer__copy">© {year} Digital Garden</p>
+    <ul class="footer__links" role="list">
+      <li><a href="https://github.com/Wilbo45" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+    </ul>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    border-top: 1px solid var(--color-border);
+    padding-block: var(--space-8);
+    margin-top: var(--space-24);
+  }
+
+  .footer__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+
+  .footer__copy {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .footer__links {
+    display: flex;
+    gap: var(--space-6);
+  }
+
+  .footer__links a {
+    font-size: var(--text-sm);
+    color: var(--color-text-subtle);
+    transition: color 0.15s ease;
+  }
+
+  .footer__links a:hover {
+    color: var(--color-navy-500);
+  }
+</style>
