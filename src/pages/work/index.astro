@@ -1,0 +1,168 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
+
+const projects = (await getCollection('work'))
+  .filter(p => !p.data.draft)
+  .sort((a, b) => b.data.year - a.data.year);
+---
+
+<BaseLayout title="Work" description="Projects, experiments, and things I've built.">
+
+  <div class="page-header">
+    <div class="container">
+      <h1 class="page-header__title">Work</h1>
+      <p class="page-header__sub">
+        Projects, experiments, and things I've built.
+      </p>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="work-list-wrap">
+      {projects.length === 0 ? (
+        <p class="empty-state">No projects yet — check back soon.</p>
+      ) : (
+        <div class="project-grid">
+          {projects.map(project => (
+            <a class="project-card" href={`/work/${project.slug}`}>
+              <div class="project-card__header">
+                <span class="project-card__year">{project.data.year}</span>
+                {project.data.tags?.map((tag: string) => (
+                  <span class="chip">{tag}</span>
+                ))}
+              </div>
+              <h2 class="project-card__title">{project.data.title}</h2>
+              <p class="project-card__desc">{project.data.description}</p>
+              <div class="project-card__footer">
+                {project.data.url && (
+                  <span class="project-card__link">Live ↗</span>
+                )}
+                {project.data.repoUrl && (
+                  <span class="project-card__link">Source ↗</span>
+                )}
+                <span class="project-card__cta">Read more →</span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  </div>
+
+</BaseLayout>
+
+<style>
+  .page-header {
+    background: var(--color-navy-900);
+    padding-block: var(--space-16) var(--space-12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .page-header__title {
+    font-size: clamp(var(--text-3xl), 5vw, var(--text-5xl));
+    font-weight: var(--weight-bold);
+    color: #fff;
+    letter-spacing: var(--tracking-tight);
+    margin-bottom: var(--space-3);
+  }
+
+  .page-header__sub {
+    font-size: var(--text-lg);
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .work-list-wrap {
+    padding-block: var(--space-12) var(--space-24);
+  }
+
+  .project-grid {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  }
+
+  .project-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    text-decoration: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+
+  .project-card:hover {
+    border-color: var(--color-navy-300);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  .project-card__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .project-card__year {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chip {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-navy-500);
+    background: var(--color-navy-50);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-pill);
+  }
+
+  .project-card__title {
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    color: var(--color-text);
+    line-height: var(--leading-snug);
+  }
+
+  .project-card__desc {
+    font-size: var(--text-sm);
+    color: var(--color-text-subtle);
+    line-height: var(--leading-relaxed);
+    flex-grow: 1;
+  }
+
+  .project-card__footer {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    margin-top: var(--space-1);
+  }
+
+  .project-card__link {
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--color-text-muted);
+  }
+
+  .project-card__cta {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-navy-500);
+    margin-left: auto;
+  }
+
+  .empty-state {
+    padding: var(--space-12);
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+</style>

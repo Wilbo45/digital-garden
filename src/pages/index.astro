@@ -7,6 +7,11 @@ const posts = (await getCollection('blog'))
   .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf())
   .slice(0, 3);
 
+const projects = (await getCollection('work'))
+  .filter(p => !p.data.draft)
+  .sort((a, b) => b.data.year - a.data.year)
+  .slice(0, 3);
+
 function formatDate(date: Date) {
   return date.toLocaleDateString('en-GB', {
     year: 'numeric',
@@ -68,6 +73,33 @@ function formatDate(date: Date) {
       )}
     </div>
   </section>
+
+  <!-- ── Work teaser ── -->
+  {projects.length > 0 && (
+    <section class="section section--alt">
+      <div class="container">
+        <div class="section__header">
+          <h2 class="section__title">Work</h2>
+          <a class="section__more" href="/work">All projects →</a>
+        </div>
+        <div class="card-grid">
+          {projects.map(project => (
+            <a class="card" href={`/work/${project.slug}`}>
+              <div class="card__meta">
+                <span class="card__year">{project.data.year}</span>
+                {project.data.tags?.map((tag: string) => (
+                  <span class="chip">{tag}</span>
+                ))}
+              </div>
+              <h3 class="card__title">{project.data.title}</h3>
+              <p class="card__desc">{project.data.description}</p>
+              <span class="card__cta">View project →</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )}
 
 </BaseLayout>
 
@@ -168,6 +200,8 @@ function formatDate(date: Date) {
   /* ── Section ── */
   .section { padding-block: var(--space-16); }
 
+  .section--alt { background: var(--color-surface-2); }
+
   .section__header {
     display: flex;
     align-items: baseline;
@@ -220,10 +254,12 @@ function formatDate(date: Date) {
     flex-wrap: wrap;
   }
 
-  .card__meta time {
+  .card__meta time,
+  .card__year {
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);
     color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
   }
 
   .chip {

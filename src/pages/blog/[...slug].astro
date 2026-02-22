@@ -33,7 +33,7 @@ function formatDate(date: Date) {
             {formatDate(post.data.pubDate)}
           </time>
           {post.data.tags?.map((tag: string) => (
-            <span class="chip chip--inverted">{tag}</span>
+            <a class="chip chip--inverted" href={`/blog/tags/${tag}`}>{tag}</a>
           ))}
         </div>
         <h1 class="post-header__title">{post.data.title}</h1>
@@ -92,7 +92,11 @@ function formatDate(date: Date) {
     background: rgba(79, 131, 234, 0.15);
     padding: 2px var(--space-2);
     border-radius: var(--radius-pill);
+    text-decoration: none;
+    transition: background 0.15s ease;
   }
+
+  .chip--inverted:hover { background: rgba(79, 131, 234, 0.28); }
 
   .post-header__title {
     font-size: clamp(var(--text-2xl), 4.5vw, var(--text-5xl));
